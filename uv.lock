@@ -1217,7 +1217,7 @@ provides-extras = ["dev"]
 [[package]]
 name = "quickbooks-online-sdk"
 version = "0.1.0"
-source = { git = "https://github.com/rgellis/quickbooks-online-sdk.git?branch=main#33ecbc23bfbc536378a088d87ee24aaaa246ad43" }
+source = { git = "https://github.com/rgellis/quickbooks-online-sdk.git?branch=main#39cc070b7f94ae62fb25c02b144501f9431b6fdf" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },

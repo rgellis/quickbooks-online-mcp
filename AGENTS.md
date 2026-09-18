@@ -61,3 +61,9 @@ with an error that points at beartype and not at this.
 
 `docker-compose.override.yml` is gitignored and puts a local checkout of the
 SDK ahead of the pinned dependency. Delete it to test against what is published.
+
+**After changing the SDK, re-lock here.** `uv.lock` pins an exact SDK commit,
+and the override hides a stale pin completely: everything passes locally while a
+clean clone installs an older SDK and fails. Run
+`uv lock --upgrade-package quickbooks-online-sdk`, then verify with the override
+removed before pushing.
