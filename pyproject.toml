@@ -1,0 +1,71 @@
+[project]
+name = "quickbooks-online-mcp"
+version = "0.1.0"
+description = "MCP server with complete coverage of the QuickBooks Online Accounting API."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Ryan Gellis" }]
+requires-python = ">=3.12"
+keywords = ["mcp", "quickbooks", "quickbooks-online", "qbo", "intuit", "accounting"]
+dependencies = [
+    "fastmcp>=4.0,<5",
+    "pyyaml>=6.0",
+    "quickbooks-online-sdk",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pyright>=1.1.402",
+    "pytest>=8.4.1",
+    "pytest-asyncio>=1.0.0",
+    "pytest-cov>=6.0.0",
+    "respx>=0.21.1",
+    "ruff>=0.8.0",
+    "types-pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/rgellis/quickbooks-online-mcp"
+Issues = "https://github.com/rgellis/quickbooks-online-mcp/issues"
+
+# The SDK is not on PyPI. Pulled from git by default so the Docker build and CI
+# need no extra configuration. For co-development, point it at a checkout:
+#   [tool.uv.sources]
+#   quickbooks-online-sdk = { path = "../quickbooks-online-sdk", editable = true }
+[tool.uv.sources]
+quickbooks-online-sdk = { git = "https://github.com/rgellis/quickbooks-online-sdk.git", branch = "main" }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+indent-width = 4
+fix = true
+exclude = [".git", ".pytest_cache", ".ruff_cache", ".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+ignore = ["E501"]
+
+[tool.pyright]
+include = ["src", "tests", "main.py"]
+exclude = ["**/__pycache__", ".venv"]
+extraPaths = ["."]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["src", "main.py"]
+branch = true
+
+[tool.coverage.report]
+# Same standard as the SDK: an untested branch in a tool wrapper is a tool that
+# returns something nobody has checked.
+fail_under = 100
+show_missing = true
+skip_covered = true
