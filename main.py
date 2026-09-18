@@ -24,7 +24,7 @@ from fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
-from src.auth import build_auth
+from src.auth import allow_list_configured, build_auth
 from src.services.accounts_service import register_account_tools
 from src.services.core_service import register_core_tools
 from src.services.expenses_service import register_expense_tools
@@ -125,6 +125,16 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "WARNING: serving HTTP with MCP_AUTH=none. Anyone who can reach "
             "this port has full access to the company's books.",
+            file=sys.stderr,
+        )
+    if auth is not None and settings.auth == "oidc" and not allow_list_configured():
+        print(
+            "WARNING: MCP_AUTH=oidc with no MCP_OIDC_ALLOWED_SUBJECTS. Anyone "
+            "the provider will authenticate can use this server. That is fine "
+            "for an organisational provider, where being in the app is the "
+            "permission -- and wrong for a consumer one like Intuit, where "
+            "any account in the world completes sign-in and Intuit exposes no "
+            "way to ask whether they have anything to do with this company.",
             file=sys.stderr,
         )
     if auth is not None and not settings.read_only:

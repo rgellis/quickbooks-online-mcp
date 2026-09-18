@@ -45,6 +45,64 @@ Identity is still recorded: every write is logged with the caller from the
 verified token. Knowing who asked is worth having even when everyone who can
 ask could have asked for anything.
 
+## Who may connect
+
+`MCP_AUTH` picks the provider: `none` (default, right for stdio), `jwt`, or
+`oidc` against any OpenID Connect issuer.
+
+**Signing in is not the same as being allowed in**, and which of those you get
+depends on the provider.
+
+An *organisational* provider answers both at once. If someone is assigned to
+the app in Okta or Entra, they are permitted; membership is the decision.
+
+A *consumer* provider answers only the first. Anyone in the world with an
+Intuit account completes a Sign in with Intuit flow successfully, and Intuit
+exposes no way to ask whether they have anything to do with the company whose
+books this server reads. Intuit's own single sign-on documentation is explicit
+that the app maps Intuit identities to its own users — authorization is yours
+to decide, not theirs to report.
+
+So with a consumer provider, this is not optional:
+
+```bash
+MCP_OIDC_ALLOWED_SUBJECTS=1182d6ec-2a1f-4aa3-af3f-bb3b95db45af,...
+```
+
+Unlisted callers are refused at the token verification boundary, before any
+tool runs. The server warns at startup if `oidc` is configured with no list.
+
+**Key it on the subject, not an email.** Intuit's own guidance: *"an Intuit
+account can have multiple emails at various points in time. However, the sub
+value never changes."* `MCP_OIDC_ALLOWED_EMAILS` exists too, and an address is
+refused when the provider reports it unverified — an unverified address may
+belong to somebody else, which is the whole reason subjects are the better key.
+
+### Signing in with QuickBooks credentials
+
+Intuit is itself an OpenID Connect provider, so users can sign in with the
+QuickBooks credentials they already have and you need no identity provider of
+your own:
+
+```bash
+MCP_AUTH=oidc
+MCP_OIDC_CONFIG_URL=https://developer.api.intuit.com/.well-known/openid_configuration
+MCP_OIDC_SCOPES=openid,email,profile
+MCP_OIDC_ALLOWED_SUBJECTS=<sub>,<sub>
+```
+
+**Request only those scopes.** Adding `com.intuit.quickbooks.accounting` would
+make every sign-in a fresh company authorization, and Intuit disconnects the
+previous one when that happens — each person signing in would break this
+server's own connection to the ledger.
+
+A caveat worth stating plainly: the ID token's `realmId` claim looks like it
+would let the server verify a user belongs to *this* company, which would be
+better than any list. It does not work. Intuit documents that `realmId` "is
+returned whenever apps specify the QuickBooks Online API or Payments API scopes
+in authorization requests" — so obtaining it requires exactly the scope that
+breaks the connection. The list is the answer.
+
 ## Tools
 
 24 tools in seven groups, selected with `--groups`.

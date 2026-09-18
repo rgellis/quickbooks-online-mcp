@@ -10,7 +10,12 @@ from fastmcp.server.auth import OIDCProxy
 
 import main
 from main import TOOL_GROUPS, build_server
-from src.auth import ScopedOIDCProxy, build_auth
+from src.auth import (
+    ScopedOIDCProxy,
+    allow_list_configured,
+    build_auth,
+    normalise_emails,
+)
 from src.settings import MissingConfiguration
 from tests.conftest import make_settings
 
@@ -211,3 +216,149 @@ class TestHealthEndpoint:
         response = await route.endpoint(Request(scope))
         assert response.status_code == 200
         assert response.body == b"OK"
+
+
+class TestAllowList:
+    """Who may sign in, once the provider says who they are.
+
+    Intuit authenticates anyone holding an Intuit account and offers no way to
+    ask whether they have any connection to the company this server reads. The
+    list is the app's user list, and without it the front door is open.
+    """
+
+    @staticmethod
+    def _proxy(
+        subjects: frozenset[str] = frozenset(),
+        emails: frozenset[str] = frozenset(),
+    ) -> ScopedOIDCProxy:
+        proxy = ScopedOIDCProxy.__new__(ScopedOIDCProxy)
+        proxy._extra_scopes = ()  # pyright: ignore[reportPrivateUsage]
+        proxy._allowed_subjects = subjects  # pyright: ignore[reportPrivateUsage]
+        # Normalised the same way the constructor does, so a change to that
+        # normalisation is visible here rather than silently bypassed.
+        proxy._allowed_emails = normalise_emails(emails)  # pyright: ignore[reportPrivateUsage]
+        return proxy
+
+    @staticmethod
+    def _token(subject: str = "abc", **claims: Any) -> Any:
+        class Verified:
+            def __init__(self) -> None:
+                self.subject = subject
+                self.claims: dict[str, Any] = dict(claims)
+
+        return Verified()
+
+    def _upstream(self, monkeypatch: pytest.MonkeyPatch, result: Any) -> None:
+        async def fake(self: object, token: str) -> Any:
+            return result
+
+        monkeypatch.setattr(OIDCProxy, "verify_token", fake)
+
+    async def test_an_allow_listed_subject_is_admitted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        token = self._token("1182d6ec")
+        self._upstream(monkeypatch, token)
+        proxy = self._proxy(subjects=frozenset({"1182d6ec"}))
+        assert await proxy.verify_token("t") is token
+
+    async def test_an_unlisted_subject_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._upstream(monkeypatch, self._token("stranger"))
+        proxy = self._proxy(subjects=frozenset({"1182d6ec"}))
+        assert await proxy.verify_token("t") is None
+
+    async def test_a_failed_upstream_verification_stays_failed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._upstream(monkeypatch, None)
+        assert await self._proxy(subjects=frozenset({"x"})).verify_token("t") is None
+
+    async def test_without_a_list_anyone_authenticated_is_admitted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Correct for an organisational provider, and dangerous for a consumer
+        one. main() warns about it at startup."""
+        token = self._token("anyone")
+        self._upstream(monkeypatch, token)
+        assert await self._proxy().verify_token("t") is token
+
+    async def test_an_allow_listed_email_is_admitted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._upstream(monkeypatch, self._token("s", email="Ryan@Example.com"))
+        proxy = self._proxy(emails=frozenset({"ryan@example.com"}))
+        assert await proxy.verify_token("t") is not None
+
+    async def test_an_unverified_email_is_refused_even_when_listed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An unverified address may belong to somebody else, which is why
+        Intuit requires the flag to be checked -- and why subjects are the
+        better key."""
+        self._upstream(
+            monkeypatch,
+            self._token("s", email="ryan@example.com", email_verified=False),
+        )
+        proxy = self._proxy(emails=frozenset({"ryan@example.com"}))
+        assert await proxy.verify_token("t") is None
+
+    async def test_the_camel_case_spelling_of_the_flag_is_honoured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._upstream(
+            monkeypatch,
+            self._token("s", email="ryan@example.com", emailVerified=False),
+        )
+        proxy = self._proxy(emails=frozenset({"ryan@example.com"}))
+        assert await proxy.verify_token("t") is None
+
+    async def test_a_verified_email_passes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._upstream(
+            monkeypatch,
+            self._token("s", email="ryan@example.com", email_verified=True),
+        )
+        proxy = self._proxy(emails=frozenset({"ryan@example.com"}))
+        assert await proxy.verify_token("t") is not None
+
+    async def test_a_mixed_case_configured_email_still_matches(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whoever writes the list types it the way a human writes an address.
+        Found by mutation testing: the earlier test passed an already-lowercase
+        list, so it could not detect the list itself going unnormalised."""
+        self._upstream(monkeypatch, self._token("s", email="ryan@example.com"))
+        proxy = self._proxy(emails=frozenset({"Ryan@Example.COM"}))
+        assert await proxy.verify_token("t") is not None
+
+    async def test_a_subject_match_does_not_require_an_email(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Intuit's ID token carries sub but not email, so a subject-keyed list
+        must work with no email claim present at all."""
+        self._upstream(monkeypatch, self._token("1182d6ec"))
+        proxy = self._proxy(
+            subjects=frozenset({"1182d6ec"}), emails=frozenset({"a@b.c"})
+        )
+        assert await proxy.verify_token("t") is not None
+
+    @pytest.mark.parametrize(
+        ("env", "expected"),
+        [
+            ({}, False),
+            ({"MCP_OIDC_ALLOWED_SUBJECTS": "abc"}, True),
+            ({"MCP_OIDC_ALLOWED_EMAILS": "a@b.c"}, True),
+            ({"MCP_OIDC_ALLOWED_SUBJECTS": "  "}, False),
+        ],
+    )
+    def test_allow_list_detection(
+        self, monkeypatch: pytest.MonkeyPatch, env: dict[str, str], expected: bool
+    ) -> None:
+        for name in ("MCP_OIDC_ALLOWED_SUBJECTS", "MCP_OIDC_ALLOWED_EMAILS"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        assert allow_list_configured() is expected
