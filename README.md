@@ -66,6 +66,51 @@ another parameter.
 Omitting `writes` is stronger than any flag: the tools are not registered, so
 there is nothing to call.
 
+### Enabling writes
+
+Two independent brakes, and they work at different levels.
+
+**`QBO_READ_ONLY`** decides whether writes are *permitted*. It defaults to
+`true`, and the write tools still appear — calling one returns:
+
+> Refusing POST journalentry: this client is in read-only mode.
+> Set read_only=False (QBO_READ_ONLY=false) to permit writes.
+
+The tools stay visible on purpose, so the refusal can say what to change.
+Hiding them would leave you wondering why the server cannot do something this
+README says it does.
+
+**`--groups`** decides whether the write tools *exist*. It defaults to `all`,
+which includes them.
+
+To permit writes, set the variable:
+
+```bash
+QBO_READ_ONLY=false
+```
+
+To remove them entirely instead, leave the group out:
+
+```bash
+./main.py --groups core,accounts,reports,sales,expenses,sync
+```
+
+The second is the stronger control, and the two fail differently. A mistyped
+variable — `QBO_READ_ONLY=flase` — silently permits writes; a tool that was
+never registered cannot be called whatever the environment says. A deployment
+with no business writing should do both.
+
+Setting one without the other does nothing useful: the group without the flag
+gives you tools that always refuse, and the flag without the group gives you
+nothing to permit.
+
+**Defaults differ by layer, deliberately.** The SDK is a library and lets its
+caller write unless told otherwise (`QboClient(..., read_only=True)`). This
+server refuses by default, because a model calling tools is a different
+proposition from code someone wrote on purpose. A deployment pointed at a live
+general ledger should be stricter still — see the deployment wrapper, which
+turns both brakes on and expects you to turn them off deliberately.
+
 ### Every response says where it came from
 
 `source`, `asOf`, and `derived` on everything; `period` where one applies;
@@ -109,7 +154,7 @@ Copy `.env.example` to `.env`.
 |---|---|
 | `QBO_CLIENT_ID` / `QBO_CLIENT_SECRET` / `QBO_REALM_ID` | required; one company |
 | `QBO_TOKEN_STORE` | where the rotating refresh token lives |
-| `QBO_READ_ONLY` | defaults **true**; refuses writes before any request is built |
+| `QBO_READ_ONLY` | defaults **true**; refuses writes before any request is built. See *Enabling writes* |
 | `QBO_MAX_ROWS` | rows returned in full before a response is summarised |
 | `MCP_TRANSPORT` | `stdio` (default) or `http` |
 | `MCP_AUTH` | `none` (default), `jwt`, or `oidc` — who may connect |
