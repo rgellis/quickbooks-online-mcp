@@ -21,6 +21,8 @@ import sys
 from typing import Any, Callable, Dict
 
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
 from src.auth import build_auth
 from src.services.accounts_service import register_account_tools
@@ -72,6 +74,19 @@ def build_server(groups: list[str] | None = None, *, auth: Any = None) -> FastMC
         )
     for name in selected:
         TOOL_GROUPS[name](mcp)
+
+    @mcp.custom_route("/health", methods=["GET"])
+    async def health(request: Request) -> PlainTextResponse:  # noqa: ARG001
+        """Liveness, for a load balancer.
+
+        Deliberately unauthenticated and deliberately shallow: it reports that
+        the process is up and serving, not that QuickBooks is reachable. A
+        health check that called the API would fail the instance out of service
+        during an Intuit outage, and replacing it would not help. Use
+        check_connection to find out whether QuickBooks is answering.
+        """
+        return PlainTextResponse("OK")
+
     return mcp
 
 

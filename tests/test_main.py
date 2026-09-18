@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 from fastmcp.server.auth import OIDCProxy
@@ -172,3 +173,41 @@ class TestScopedProxy:
             proxy, "txn", {}
         )
         assert captured["scopes"] == ["openid", "offline_access"]
+
+
+class TestHealthEndpoint:
+    """The load balancer's only view of this process."""
+
+    @staticmethod
+    def _health_route(groups: list[str]) -> Any:
+        app = build_server(groups).http_app()
+        for route in app.routes:
+            if getattr(route, "path", None) == "/health":
+                return route
+        return None
+
+    def test_health_is_registered(self) -> None:
+        assert self._health_route(["core"]) is not None
+
+    def test_health_is_registered_whatever_groups_are_selected(self) -> None:
+        """A deployment running only reports still has to become healthy."""
+        for groups in (["core"], ["reports"], ["all"]):
+            assert self._health_route(groups) is not None, groups
+
+    async def test_health_answers_without_authentication(self) -> None:
+        """It has to answer before anyone signs in, or the instance never
+        becomes healthy enough to sign in to."""
+        from starlette.requests import Request
+
+        route = self._health_route(["core"])
+        assert route is not None
+        scope: dict[str, Any] = {
+            "type": "http",
+            "method": "GET",
+            "path": "/health",
+            "headers": [],
+            "query_string": b"",
+        }
+        response = await route.endpoint(Request(scope))
+        assert response.status_code == 200
+        assert response.body == b"OK"
